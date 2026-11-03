@@ -113,4 +113,12 @@ describe GstPlay do
       expect(states.first).to be_a(GstPlay::PlayState)
     end
   end
+
+  it "also defines GstBadAudio from the same package" do
+    # GstBadAudio-1.0 ships alongside GstPlay's typelib, so this gem covers it
+    # too. Asserted because a silent regression here would quietly reopen a
+    # gap on the Bindings board.
+    expect(Object.const_defined?(:GstBadAudio)).to be == true
+    expect(GstBadAudio.constants.size).to be > 5
+  end
 end
