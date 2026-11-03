@@ -1,0 +1,33 @@
+GstPlay for Ruby
+Copyright 2026 General Intelligence Systems
+
+This product includes software developed by the GStreamer project.
+
+--------------------------------------------------------------------------------
+GStreamer
+--------------------------------------------------------------------------------
+
+This gem is a binding, not an implementation. It contains no GStreamer code:
+GObjectIntrospection::Loader reads GstPlay-1.0.typelib -- a machine-readable
+description of the library, installed by gst-plugins-bad -- at require time and
+defines Ruby classes from it. Nothing is linked, vendored, bundled or
+redistributed here, and nothing in this repository is derived from GStreamer's
+source.
+
+GStreamer and its plugin modules are licensed LGPL-2.1-or-later. The gem reads
+whatever copy the system already has.
+
+  https://gitlab.freedesktop.org/gstreamer/gstreamer
+  Copyright 1999-2026 the GStreamer contributors
+  Licensed under the GNU Lesser General Public License v2.1 or later
+
+--------------------------------------------------------------------------------
+ruby-gnome
+--------------------------------------------------------------------------------
+
+The loader follows ruby-gnome's own, and the gem depends on its
+gobject-introspection and glib2 gems, which are not redistributed here.
+
+  https://github.com/ruby-gnome/ruby-gnome
+  Copyright 2002-2026 the Ruby-GNOME Project Team
+  Licensed under the GNU Lesser General Public License v2.1 or later

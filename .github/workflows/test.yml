@@ -1,0 +1,88 @@
+# Runs the suite in the same dev shell a developer gets.
+#
+# This gem is pure Ruby, so there is nothing to cross-compile and no
+# per-platform matrix -- which is the point of the conversion: the Rust binding
+# this replaced could not be built for any platform, because rb-sys-dock has no
+# glib for any target and every gir-generated crate starts at `glib-sys`.
+#
+# What this does need is GstPlay's typelib, the glib that typelib was built
+# against, and GStreamer's plugins -- get the first two from different places
+# and GIO is registered twice in one process, which fails as
+# `cannot register existing type 'GTlsCertificate'`.
+#
+# flake.nix already pins all of that and puts it on GI_TYPELIB_PATH and
+# GST_PLUGIN_SYSTEM_PATH_1_0. So CI runs through `nix develop` rather than
+# installing gems and apt packages and hoping the versions line up: the
+# environment is the hard part of a GI binding, and CI checking a different one
+# than people develop in is how an environment bug reaches a release.
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # The flake evaluates `self`, so the files have to be in git's index.
+      # A checkout satisfies that; this is the guard for anything generated.
+      - name: Check the tree is what the flake will see
+        run: git status --porcelain
+
+      - name: Run the suite
+        run: nix develop --command bin/test
+
+      # The gem must stay pure Ruby: no extension of its own, and no
+      # resurrection of the Rust dependencies that were removed. Checked
+      # against the built artefact rather than the working tree, because what
+      # ships is what matters.
+      #
+      # This deliberately does not try `gem install` into a fresh GEM_HOME.
+      # The dev shell's ruby comes from bundlerEnv and has GEM_HOME baked into
+      # the read-only store, so an install there fails on permissions and
+      # proves nothing either way. And it would not prove "no toolchain"
+      # regardless: glib2 and gobject-introspection are native extensions, so
+      # installing this gem does compile C. What is true, and what the README
+      # says, is that this gem adds no build step beyond the two every
+      # ruby-gnome application already needs.
+      - name: The packaged gem is pure Ruby
+        run: |
+          nix develop --command bash -lc '
+            set -euo pipefail
+            gem build gstreamer_play.gemspec
+            contents=$(tar -xOf gstreamer_play-*.gem data.tar.gz | tar -tzf -)
+            echo "$contents"
+            if echo "$contents" | grep -qE "(^|/)ext/|\.rs$|Cargo\.(toml|lock)"; then
+              echo "::error::the packaged gem carries native-extension sources"; exit 1
+            fi
+            ruby -e "
+              spec = Gem::Specification.load(\"gstreamer_play.gemspec\")
+              abort \"gemspec declares extensions: #{spec.extensions}\" unless spec.extensions.empty?
+              names = spec.runtime_dependencies.map(&:name).sort
+              # Not an equality check: these gems legitimately depend on a
+              # parent namespace gem (gstreamer, gtk4) because the library
+              # will not load until that one has initialised it. What must
+              # stay gone is the Rust toolchain.
+              rust = names.grep(/rb_sys|rake-compiler/)
+              abort \"rust dependencies are back: #{rust}\" unless rust.empty?
+              puts \"packaged gem is pure Ruby; runtime deps: #{names.join(\", \")}\"
+            "
+          '
