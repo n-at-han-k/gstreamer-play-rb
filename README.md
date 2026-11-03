@@ -94,6 +94,70 @@ and fails with `cannot register existing type 'GTlsCertificate'`. Under nix,
 take both from one nixpkgs — and note that glib's and gstreamer's typelibs are
 in their `out` output, not the default `bin` one.
 
+## Using it from a flake
+
+The gem needs `GstPlay-1.0.typelib` and everything that typelib declares,
+resolved transitively by the loader at `require` time — six GStreamer
+namespaces (Gst, GstBase, GstVideo, GstAudio, GstTag, GstPbutils) and
+GLib/GObject/Gio under those. A missing one surfaces as
+`Typelib file for namespace 'X' not found`, one at a time, so the whole chain
+is listed here rather than discovered by repeated failure:
+
+- `pkgs.gst_all_1.gst-plugins-bad` — `GstPlay-1.0` itself, plus `GstBadAudio-1.0`
+- `pkgs.gst_all_1.gst-plugins-base` — `GstPbutils`, `GstVideo`, `GstAudio`, `GstTag`
+- `pkgs.gst_all_1.gstreamer` — `Gst-1.0` and `GstBase-1.0`, and the `gst_init`
+  this namespace cannot load without
+- `pkgs.gst_all_1.gst-plugins-good` — no typelib; it carries plugins (see below)
+- `pkgs.glib` — `GLib-2.0`, `GObject-2.0` and `Gio-2.0`
+
+Note the `.out`: a package's default output is often `bin`, which carries no
+typelibs — true of both glib and gstreamer here. `makeSearchPath` takes the
+first output, so it has to be asked for `out` explicitly. This is the single
+most common way to get a search path that looks right and finds nothing.
+
+`GST_PLUGIN_SYSTEM_PATH_1_0` is the second thing, and it is not optional for
+this namespace: `GstPlay::Play.new` builds a `playbin3`, and GstPlay treats a
+missing `playbin3` as a fatal `g_error` rather than as something it can report.
+A shell with the typelibs but no plugins aborts instead of raising.
+
+```nix
+{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+  outputs = { nixpkgs, ... }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+
+      gstPackages = with pkgs.gst_all_1; [
+        gst-plugins-bad
+        gst-plugins-base
+        gstreamer
+        gst-plugins-good
+      ];
+
+      typelibPath = pkgs.lib.makeSearchPath "lib/girepository-1.0"
+        (map (drv: drv.out or drv) (gstPackages ++ [ pkgs.glib ]));
+
+      pluginPath = pkgs.lib.makeSearchPath "lib/gstreamer-1.0" gstPackages;
+    in
+    {
+      devShells.${system}.default = pkgs.mkShell {
+        packages = [ pkgs.ruby_3_4 pkgs.bundler ] ++ gstPackages;
+
+        shellHook = ''
+          export GI_TYPELIB_PATH="${typelibPath}''${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
+          export GST_PLUGIN_SYSTEM_PATH_1_0="${pluginPath}"
+        '';
+      };
+    };
+}
+```
+
+Everything must come from **one** nixpkgs. A typelib built against a different
+glib than the `gobject-introspection` gem registers GIO twice in the process
+and fails with `cannot register existing type 'GTlsCertificate'`.
+
 ## Development
 
 ```sh
